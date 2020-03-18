@@ -59,7 +59,7 @@ class AttentiveNP():
         self.y_size = y_size
         self.r_size = r_size
         self.det_encoder = DeterministicEncoder(x_size, y_size, r_size, det_encoder_n_hidden,
-                               det_encoder_hidden_size, attention_type)
+                               det_encoder_hidden_size, self_att=True, cross_att=True, attention_type = "multihead")
         self.lat_encoder = LatentEncoder((x_size + y_size), r_size, lat_encoder_n_hidden,
                                                 lat_encoder_hidden_size)
         self.decoder = Decoder((x_size + r_size + r_size), y_size, decoder_n_hidden,
@@ -172,63 +172,86 @@ class AttentiveNP():
                 print("Iteration " + str(iteration) + ":, Loss = {:.3f}".format(loss.item()))
                 # We can set testing = True if we want to check that we are not overfitting.
                 if testing:
-                    _, predict_train_mean, predict_train_var = self.predict(x_tot_context,
-                                                                            y_tot_context,
-                                                                            x_tot_context)
-                    predict_train_mean = np.squeeze(predict_train_mean.data.numpy(), axis=0)
-                    predict_train_var = np.squeeze(predict_train_var.data.numpy(), axis=0)
 
-                    x_test = torch.unsqueeze(x_test, dim=0)
-                    _, predict_test_mean, predict_test_var = self.predict(x_tot_context,
-                                                                          y_tot_context,
-                                                                          x_test)
-                    x_test = torch.squeeze(x_test, dim=0)
-                    predict_test_mean = np.squeeze(predict_test_mean.data.numpy(), axis=0)
-                    predict_test_var = np.squeeze(predict_test_var.data.numpy(), axis=0)
-
-                    # We transform the standardised predicted and actual y values back to the original data
-                    # space
-                    y_train_mean_pred = y_scaler.inverse_transform(predict_train_mean)
-                    y_train_var_pred = y_scaler.var_ * predict_train_var
-                    y_train_untransformed = y_scaler.inverse_transform(y_train)
-
-                    # We transform the standardised predicted and actual y values back to the original data
-                    # space
-                    y_test_mean_pred = y_scaler.inverse_transform(predict_test_mean)
-                    y_test_var_pred = y_scaler.var_ * predict_test_var
-                    y_test_untransformed = y_scaler.inverse_transform(y_test)
-
-                    r2_train = r2_score(y_train_untransformed, y_train_mean_pred)
-                    rmse_train = mean_squared_error(y_train_untransformed, y_train_mean_pred)
-
+                    r2_train_list = []
+                    rmse_train_list = []
+                    nlpd_train_list = []
                     r2_test_list = []
                     rmse_test_list = []
                     nlpd_test_list = []
 
+                    #Useful for determining uncertainty due to sampling z.
                     for j in range(10):
+                        _, predict_train_mean, predict_train_var = self.predict(x_tot_context,
+                                                                                y_tot_context,
+                                                                                x_tot_context)
+                        predict_train_mean = np.squeeze(predict_train_mean.data.numpy(), axis=0)
+                        predict_train_var = np.squeeze(predict_train_var.data.numpy(), axis=0)
+
+                        # We transform the standardised predicted and actual y values back to the original data
+                        # space
+                        y_train_mean_pred = y_scaler.inverse_transform(predict_train_mean)
+                        y_train_var_pred = y_scaler.var_ * predict_train_var
+                        y_train_untransformed = y_scaler.inverse_transform(y_train)
+
+                        r2_train = r2_score(y_train_untransformed, y_train_mean_pred)
+                        nlpd_train = nlpd(y_train_mean_pred, y_train_var_pred, y_train_untransformed)
+                        rmse_train = np.sqrt(mean_squared_error(y_train_untransformed,
+                                                               y_train_mean_pred))
+                        r2_train_list.append(r2_train)
+                        rmse_train_list.append(rmse_train)
+                        nlpd_train_list.append(nlpd_train)
+
+
+                        x_test = torch.unsqueeze(x_test, dim=0)
+                        _, predict_test_mean, predict_test_var = self.predict(x_tot_context,
+                                                                              y_tot_context,
+                                                                              x_test)
+                        x_test = torch.squeeze(x_test, dim=0)
+                        predict_test_mean = np.squeeze(predict_test_mean.data.numpy(), axis=0)
+                        predict_test_var = np.squeeze(predict_test_var.data.numpy(), axis=0)
+
+
+                        # We transform the standardised predicted and actual y values back to the original data
+                        # space
+                        y_test_mean_pred = y_scaler.inverse_transform(predict_test_mean)
+                        y_test_var_pred = y_scaler.var_ * predict_test_var
+                        y_test_untransformed = y_scaler.inverse_transform(y_test)
+
                         indices = np.random.permutation(y_test_untransformed.shape[0])[0:20]
                         r2_test = r2_score(y_test_untransformed[indices, 0], y_test_mean_pred[indices, 0])
                         rmse_test = np.sqrt(mean_squared_error(y_test_untransformed[indices, 0],
-                                                       y_test_mean_pred[indices, 0]))
+                                                               y_test_mean_pred[indices, 0]))
                         nlpd_test = nlpd(y_test_mean_pred[indices, 0], y_test_var_pred[indices, 0],
                                          y_test_untransformed[indices, 0])
+
                         r2_test_list.append(r2_test)
                         rmse_test_list.append(rmse_test)
                         nlpd_test_list.append(nlpd_test)
 
+                    r2_train_list = np.array(r2_train_list)
+                    rmse_train_list = np.array(rmse_train_list)
+                    nlpd_train_list = np.array(nlpd_train_list)
                     r2_test_list = np.array(r2_test_list)
                     rmse_test_list = np.array(rmse_test_list)
                     nlpd_test_list = np.array(nlpd_test_list)
 
-                    print("\nmean R^2 (test): {:.3f} +- {:.3f}".format(np.mean(r2_test_list),
+
+                    print("\nR^2 score (train): {:.3f} +- {:.3f}".format(np.mean(r2_train_list),
+                                                                       np.std(r2_train_list) / np.sqrt(
+                                                                           len(r2_train_list))))
+                    #print("RMSE (train): {:.3f} +- {:.3f}".format(np.mean(rmse_train_list) / np.sqrt(
+                                                                          #len(rmse_train_list))))
+                    print("NLPD (train): {:.3f} +- {:.3f}".format(np.mean(nlpd_train_list),
+                                                                        np.std(nlpd_train_list) / np.sqrt(
+                                                                            len(nlpd_train_list))))
+                    print("R^2 score (test): {:.3f} +- {:.3f}".format(np.mean(r2_test_list),
                                                                 np.std(r2_test_list) / np.sqrt(len(r2_test_list))))
-                    print("mean RMSE (test): {:.3f} +- {:.3f}".format(np.mean(rmse_test_list),
-                                                               np.std(rmse_test_list) / np.sqrt(len(rmse_test_list))))
-                    print("mean NLPD (test): {:.3f} +- {:.3f}\n".format(np.mean(nlpd_test_list),
+                    #print("RMSE (test): {:.3f} +- {:.3f}".format(np.mean(rmse_test_list),
+                                                               #np.std(rmse_test_list) / np.sqrt(len(rmse_test_list))))
+                    print("NLPD (test): {:.3f} +- {:.3f}\n".format(np.mean(nlpd_test_list),
                                                                 np.std(nlpd_test_list) / np.sqrt(len(nlpd_test_list))))
 
-                    print("R2 score (train) = {:.3f}".format(r2_train))
-                    print("RMSE score (train) = {:.3f}".format(rmse_train))
 
                     if iteration % 1000==0:
                         if plotting:
@@ -250,13 +273,13 @@ class AttentiveNP():
                                              color='cyan', alpha=0.2)
                             plt.title('Predictive distribution')
                             plt.ylabel('f(x)')
-                            plt.yticks([-40, -20, 0, 20, 40])
+                            plt.yticks([-80, -60, -40, -20, 0, 20, 40, 60, 80])
                             plt.ylim(-80, 80)
                             plt.xlim(-4, 4)
                             plt.xlabel('x')
                             plt.xticks([-4, -2, 0, 2, 4])
                             plt.legend()
-                            plt.savefig('results/anp_1d_reg' + str(iteration) + '.png')
+                            plt.savefig('results/anp_1dreg_crossatt_selfatt' + str(iteration) + '.png')
 
             loss.backward()
             self.optimiser.step()

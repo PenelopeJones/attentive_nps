@@ -1,6 +1,58 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
+
+import pdb
+
+class SelfAttention(nn.Module):
+    """
+
+    """
+    def __init__(self, input_size, hidden_size, n_hidden, output_size, num_heads = 4):
+        super().__init__()
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.n_hidden = n_hidden
+        self.output_size = output_size
+        self.num_heads = num_heads
+
+        self.initial_transform = nn.Linear(self.input_size, self.hidden_size)
+        self.pre_relu_transform = nn.ModuleList()
+        self.attentions = nn.ModuleList()
+        self.post_relu_transform = nn.ModuleList()
+        self.final_transform = nn.Linear(self.hidden_size, self.output_size)
+
+        for i in range(self.n_hidden - 1):
+            self.attentions.append(MultiHeadAttention(key_size=self.hidden_size, value_size=self.hidden_size,
+                                                      key_hidden_size=self.hidden_size, num_heads=self.num_heads))
+            self.pre_relu_transform.append(nn.Linear(self.hidden_size, self.hidden_size))
+
+            self.post_relu_transform.append(nn.Linear(self.hidden_size, self.hidden_size))
+
+
+    def forward(self, input, batch_size):    #input = [batch_size * N_context, input_size]
+        self.batch_size = batch_size
+        #Initial transformation
+        input = F.relu(self.initial_transform(input)).view(self.batch_size, -1, self.hidden_size)  #[batch_size, N_context, hidden_size].
+
+
+        #There are sublayers within each layer; the first is a Multihead attention sublayer, the second is a FFN
+        # output = Relu(W1*input + b1)*W2 + b2 (as described in "Attention Is All You Need" paper).
+        #Need to add the Layer Norm and mask.
+        for attention, fc1, fc2 in zip(self.attentions, self.layer_norms, self.pre_relu_transform, self.post_relu_transform):
+            input = attention(input)
+
+            input = F.relu(fc1(input)) #[batch_size, N_context, hidden_size].
+
+            input = fc2(input)
+
+        #input = input.view(-1, self.hidden_size)
+        input = self.final_transform(input)
+
+        return input
+
 
 class MultiHeadAttention(nn.Module):
     """
@@ -25,14 +77,22 @@ class MultiHeadAttention(nn.Module):
         self._value_transform = nn.Linear(self._value_size, self._num_heads*self._head_size, bias=False)  #Apply linear transformation [value_size, head_size]
         self._head_transform = nn.Linear(self._num_heads*self._head_size, self._value_size, bias=False)   #Apply final linear transformation [num_heads*head_size, value_size]
 
-    def forward(self, queries, keys, values):
+    def forward(self, queries, keys=None, values=None):
         """
 
         :param queries: [batch_size, N_target, key_size]
         :param keys: [batch_size, N_context, key_size]
-        :param values:
+        :param values: [batch_size, N_context, value_size]
         :return:
         """
+
+        #For self attention mechanism, queries, keys and values all take the same values.
+        if keys is None:
+            keys = queries
+
+        if values is None:
+            values = queries
+
         self._batch_size = queries.shape[0]
         self._n_target = queries.shape[1]
         self._n_context = keys.shape[1]

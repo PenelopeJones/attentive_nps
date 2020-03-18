@@ -8,7 +8,12 @@ from gpflow.config import default_jitter
 from gpflow.likelihoods import Gaussian
 from gpflow.kernels import SquaredExponential
 
+"""
+GPSampler is suitable for when you have access to only one function. In this case, the 
+NP can be trained using samples from a GP prior which is fit to that single function. 
 
+This will result in the NP learning to model a GP prior. 
+"""
 class GPSampler():
     def __init__(self, data, Z=None, kernel=SquaredExponential(),
                  likelihood=Gaussian(), mean_function=None, maxiter=1000):
@@ -75,3 +80,34 @@ class GPSampler():
         y_context = np.array(y_context)
 
         return x_context, y_context, x, y
+
+"""
+The GPDataGenerator can be used when we wish to generate N functions all sampled from the same, fixed GP prior.
+"""
+class GPDataGenerator():
+    def __init__(self, kernel=SquaredExponential(),
+                 likelihood=Gaussian()):
+        self.kernel = kernel
+        self.likelihood = likelihood
+
+    def sample(self, train_size, test_size, x_min, x_max):
+        # [num_context]
+        x_train = np.random.uniform(x_min, x_max, size=(train_size))
+        x_test = np.random.uniform(x_min - 1, x_max + 1, size=(test_size))
+
+        x = np.concatenate((x_train, x_test))
+        x = np.expand_dims(x, 1)  # [train_size + test_size, 1]
+
+        knn = self.kernel(x)  # [batch_size, train_size, train_size]
+        knn = ops.add_to_diagonal(knn, default_jitter())
+        Lnn = np.linalg.cholesky(knn)
+        Vnn = np.random.normal(size=(train_size + test_size, 1))
+
+        y = Lnn @ Vnn  # [train_size + test_size]
+
+        x_train = x[:train_size, :]
+        y_train = y[:train_size, :]
+        x_test = x[train_size:, :]
+        y_test = y[train_size:, :]
+
+        return x_train, y_train, x_test, y_test

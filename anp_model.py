@@ -25,8 +25,6 @@ from gp_sampler import GPSampler
 
 from data_utils import nlpd
 
-import pdb
-
 class AttentiveNP():
     """
     The Attentive Neural Process model.
@@ -138,10 +136,10 @@ class AttentiveNP():
             r = self.det_encoder.forward(x_context, y_context, x_target)  #[batch_size, N_target, r_size]
 
             # The latent encoder outputs a prior distribution over the latent embedding z (conditioned only on the context points).
-            z_priors, mu_prior, sigma_prior = self.lat_encoder.forward(input_context.float())
+            z_priors, mu_prior, sigma_prior = self.lat_encoder.forward(x_context, y_context)
 
             if y_target is not None:
-                z_posteriors, mu_posterior, sigma_posterior = self.lat_encoder.forward(input_target.float())
+                z_posteriors, mu_posterior, sigma_posterior = self.lat_encoder.forward(x_target, y_target)
                 zs= [dist.sample() for dist in z_posteriors]      #[batch_size, r_size]
 
             else:
@@ -279,7 +277,7 @@ class AttentiveNP():
                             plt.xlabel('x')
                             plt.xticks([-4, -2, 0, 2, 4])
                             plt.legend()
-                            plt.savefig('results/anp_1dreg_crossatt_selfatt' + str(iteration) + '.png')
+                            plt.savefig('results/anp_1dreg_crossatt_2selfatt' + str(iteration) + '.png')
 
             loss.backward()
             self.optimiser.step()
@@ -301,8 +299,7 @@ class AttentiveNP():
 
         r = self.det_encoder.forward(x_context, y_context, x_target)
         # The latent encoder outputs a distribution over the latent embedding z.
-        dists_z, _, _ = self.lat_encoder.forward(torch.cat((x_context, y_context),
-                                                          dim=2).float())
+        dists_z, _, _ = self.lat_encoder.forward(x_context, y_context)
         zs = [dist.sample() for dist in dists_z]  # [batch_size, r_size]
         z = torch.cat(zs)
         z = z.view(-1, self.r_size)

@@ -2,25 +2,56 @@
 Script for generating 1-dimensional train and test toy regression data from a noisy function.
 """
 import numpy as np
+from gp_sampler import GPDataGenerator
+import matplotlib.pyplot as plt
 
-from data_utils import x_generator, noisy_function
+import pdb
 
-min_x = -3.5
-max_x = 3.5
-n_points = 20
-std=3.0
-
+data_generator = GPDataGenerator()
+dataname = "1DGPSquaredExponentialb_"
+x_trains = []
+y_trains = []
+x_tests = []
+y_tests = []
 #Generate 5 sets of values of x in the range [min_x, max_x], to be used for training and testing
+plt.figure()
 for i in range(5):
-    X_train = x_generator(min_x, max_x, n_points)
-    y_train = noisy_function(X_train, std)
-    np.save('data/xtrain_1dreg' + str(i) + '.npy', X_train)
-    np.save('data/ytrain_1dreg' + str(i) + '.npy', y_train)
+    n_train = np.random.randint(low = 400, high = 900)
+    n_test = int(0.15*n_train)
+    print(n_train)
+    print(n_test)
+    x_train, y_train, x_test, y_test = data_generator.sample(train_size=n_train, test_size=n_test, x_min=-3, x_max=3)
 
-    #Generate target values of x and y for sampling from later on
-    X_test = np.expand_dims(np.linspace(min_x - 0.5, max_x + 0.5, 140), axis = 1)
-    y_test = noisy_function(X_test, 3)
+    x_trains.append(x_train)
+    y_trains.append(y_train)
+    x_tests.append(x_test)
+    y_tests.append(y_test)
 
-    np.save('data/xtest_1dreg' + str(i) + '.npy', X_test)
-    np.save('data/ytest_1dreg' + str(i) + '.npy', y_test)
+    if i ==0:
+        plt.scatter(x_train, y_train, c='r', s=2, label="train")
+        plt.scatter(x_test, y_test, c="b", s=2, label="test")
+    else:
+        plt.scatter(x_train, y_train, c='r', s=2)
+        plt.scatter(x_test, y_test, c="b", s=2)
+plt.legend()
+plt.xlabel("x")
+plt.xticks([])
+plt.ylabel('f(x)')
+plt.yticks([])
+plt.show()
+plt.savefig(dataname + "plot.png")
+
+x_trains = np.array(x_trains)
+y_trains = np.array(y_trains)
+x_tests = np.array(x_tests)
+y_tests = np.array(y_tests)
+
+pdb.set_trace()
+
+
+ptr = "data/"
+np.save(ptr + dataname + "X_trains.npy", x_trains)
+np.save(ptr + dataname + "y_trains.npy", y_trains)
+np.save(ptr + dataname + "X_tests.npy", x_tests)
+np.save(ptr + dataname + "y_tests.npy", y_tests)
 

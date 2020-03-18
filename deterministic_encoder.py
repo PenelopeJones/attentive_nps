@@ -8,6 +8,8 @@ import torch.nn.functional as F
 
 from attention import *
 
+import pdb
+
 class DeterministicEncoder(nn.Module):
     """The Deterministic Encoder."""
     def __init__(self, x_size, y_size, r_size, encoder_n_hidden,
@@ -33,34 +35,39 @@ class DeterministicEncoder(nn.Module):
         self.cross_att = cross_att
         self.attention_type = attention_type
 
-        if self.cross_att == True:
-            if attention_type == "multihead":
-                print("Using multihead cross attention.")
-                self.cross_attention = MultiHeadAttention(key_size=x_size, value_size=r_size, num_heads=4,
-                                                          key_hidden_size=self.r_size, normalise=True)
-            else:
-                print("Using uniform cross attention.")
+        self.fcs = nn.ModuleList()
+        for i in range(self.n_hidden + 1):
+            if i == 0:
+                self.fcs.append(nn.Linear(self.input_size, self.hidden_size))
 
-        else:
-            print("Not using cross attention.")
+            elif i == self.n_hidden:
+                self.fcs.append(nn.Linear(self.hidden_size, self.r_size))
+
+            else:
+                self.fcs.append(nn.Linear(self.hidden_size, self.hidden_size))
 
         if self.self_att == True:
-            print("Using multihead self attention.")
-            self.self_attention = SelfAttention(input_size=self.input_size, hidden_size=self.hidden_size,
-                                                n_hidden=self.n_hidden, output_size=self.r_size, num_heads=4)
+            print("Deterministic encoder: using multihead self attention.")
+            self.self_attention = MultiHeadAttention(key_size=self.hidden_size, value_size = self.hidden_size,
+                                                     num_heads=4, key_hidden_size=self.hidden_size)
 
         else:
-            print("Not using self attention.")
-            self.fcs = nn.ModuleList()
-            for i in range(self.n_hidden + 1):
-                if i == 0:
-                    self.fcs.append(nn.Linear(self.input_size, self.hidden_size))
+            print("Deterministic encoder: not using self attention.")
 
-                elif i == self.n_hidden:
-                    self.fcs.append(nn.Linear(self.hidden_size, self.r_size))
+        if self.cross_att == True:
+            self.key_transform = nn.ModuleList([nn.Linear(self.x_size, self.hidden_size),
+                                               nn.Linear(self.hidden_size, self.hidden_size)])
 
-                else:
-                    self.fcs.append(nn.Linear(self.hidden_size, self.hidden_size))
+            if attention_type == "multihead":
+                print("Deterministic encoder: using multihead cross attention.")
+                self.cross_attention = MultiHeadAttention(key_size=self.hidden_size, value_size=self.r_size, num_heads=4,
+                                                          key_hidden_size=self.r_size, normalise=True)
+            else:
+                print("Deterministic encoder: using uniform cross attention.")
+
+        else:
+            print("Deterministic encoder: not using cross attention.")
+
 
     def forward(self, x, y, x_target):
         """
@@ -74,24 +81,36 @@ class DeterministicEncoder(nn.Module):
         batch_size = input.shape[0]
         input = input.view(-1, self.input_size)     #[batch_size * N_context, (x_size + y_size)]
 
-        if self.self_att == True:
-            input = self.self_attention.forward(input, batch_size)  #[batch_size, N_context, r_size]
+        for fc in self.fcs[:-1]:
+            input = F.relu(fc(input))               #[batch_size * N_context, hidden_size]
 
-        else:
-            #Pass (x, y)_i through the MLP to get r_i.
-            for fc in self.fcs[:-1]:
-                input = F.relu(fc(input))                #[batch_size * N_context, hidden_size]
-            input = self.fcs[-1](input)    #[batch_size * N_context, self.r_size]
+        input = input.view(batch_size, -1, self.hidden_size)     #[batch_size, N_context, hidden_size]
+        if self.self_att == True:
+            input = self.self_attention.forward(input)  #[batch_size, N_context, hidden_size]
+
+        input = self.fcs[-1](input)         #[batch_size, N_context, r_size]
 
         # Aggregate the embeddings
         input = input.view(batch_size, -1, self.r_size)  # [batch_size, N_context, self.r_size]
 
         #Using cross attention
+        x_target = x_target.view(-1, self.x_size)
+        x = x.view(-1, self.x_size)
+
+        #First transform the inputs
+        for transform in self.key_transform[:-1]:
+            queries = F.relu(transform(x_target))
+            keys = F.relu(transform(x))
+        queries = self.key_transform[-1](queries)   #[batch_size, N_target, hidden_size]
+        keys = self.key_transform[-1](keys)       #[batch_size, N_context, hidden_size]
+        queries = queries.view(batch_size, -1, self.hidden_size)
+        keys = keys.view(batch_size, -1, self.hidden_size)
+
         if self.attention_type == "multihead":
-            output = self.cross_attention.forward(queries=x_target.float(), keys=x.float(), values=input) #[batch_size, N_target, r_size]
+            output = self.cross_attention.forward(queries=queries.float(), keys=keys.float(), values=input) #[batch_size, N_target, r_size]
 
         elif self.attention_type == "uniform":
-            output = uniform_attention(queries=x_target.float(), values=input)
+            output = uniform_attention(queries=queries.float(), values=input)
 
         elif self.attention_type == "laplace":
             output = laplace_attention(queries=x_target.float(), keys=x.float(), values=input, scale=1.0, normalise=True)

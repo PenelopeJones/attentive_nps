@@ -13,7 +13,7 @@ from attention import MultiHeadAttention
 class LatentEncoder(nn.Module):
     """The Latent Encoder."""
 
-    def __init__(self, input_size, r_size, encoder_n_hidden, encoder_hidden_size, self_att=False):
+    def __init__(self, input_size, r_size, n_hidden, hidden_size, self_att=False):
         """
         :param input_size: An integer describing the dimensionality of the input to the encoder;
                            in this case the sum of x_size and y_size
@@ -27,8 +27,8 @@ class LatentEncoder(nn.Module):
         super().__init__()
         self.input_size = input_size
         self.r_size = r_size
-        self.n_hidden = encoder_n_hidden
-        self.hidden_size = encoder_hidden_size
+        self.n_hidden = n_hidden
+        self.hidden_size = hidden_size
         self.self_att = self_att
 
         self.n2_hidden = 2
@@ -38,13 +38,13 @@ class LatentEncoder(nn.Module):
         # Encoder function taking as input (x,y)_i and outputting r_i
         for i in range(self.n_hidden + 1):
             if i == 0:
-                self.fcs1.append(nn.Linear(input_size, encoder_hidden_size))
+                self.fcs1.append(nn.Linear(input_size, hidden_size))
 
             elif i == encoder_n_hidden:
-                self.fcs1.append(nn.Linear(encoder_hidden_size, r_size))
+                self.fcs1.append(nn.Linear(hidden_size, r_size))
 
             else:
-                self.fcs1.append(nn.Linear(encoder_hidden_size, encoder_hidden_size))
+                self.fcs1.append(nn.Linear(hidden_size, hidden_size))
 
         if self.self_att:
             print("Latent encoder: using multihead self attention.")

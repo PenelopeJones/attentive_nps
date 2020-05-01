@@ -8,8 +8,6 @@ import torch.nn.functional as F
 
 from attention import *
 
-import pdb
-
 class DeterministicEncoder(nn.Module):
     """The Deterministic Encoder."""
     def __init__(self, x_size, y_size, r_size, encoder_n_hidden,
@@ -46,22 +44,27 @@ class DeterministicEncoder(nn.Module):
             else:
                 self.fcs.append(nn.Linear(self.hidden_size, self.hidden_size))
 
-        if self.self_att == True:
+        if self.self_att:
             print("Deterministic encoder: using multihead self attention.")
-            self.self_attention = MultiHeadAttention(key_size=self.hidden_size, value_size = self.hidden_size,
-                                                     num_heads=4, key_hidden_size=self.hidden_size)
+            self.self_attention = MultiHeadAttention(key_size=self.hidden_size,
+                                                     value_size=self.hidden_size,
+                                                     num_heads=4,
+                                                     key_hidden_size=self.hidden_size)
 
         else:
             print("Deterministic encoder: not using self attention.")
 
-        if self.cross_att == True:
+        if self.cross_att:
             self.key_transform = nn.ModuleList([nn.Linear(self.x_size, self.hidden_size),
-                                               nn.Linear(self.hidden_size, self.hidden_size)])
+                                                nn.Linear(self.hidden_size, self.hidden_size)])
 
             if attention_type == "multihead":
                 print("Deterministic encoder: using multihead cross attention.")
-                self.cross_attention = MultiHeadAttention(key_size=self.hidden_size, value_size=self.r_size, num_heads=4,
-                                                          key_hidden_size=self.r_size, normalise=True)
+                self.cross_attention = MultiHeadAttention(key_size=self.hidden_size,
+                                                          value_size=self.r_size,
+                                                          num_heads=4,
+                                                          key_hidden_size=self.r_size,
+                                                          normalise=True)
             else:
                 print("Deterministic encoder: using uniform cross attention.")
 
@@ -77,21 +80,23 @@ class DeterministicEncoder(nn.Module):
         :return: The embeddings, a tensor of dimensionality [batch_size, N_context,
                  r_size]
         """
+
         input = torch.cat((x, y), dim=-1).float()    #[batch_size, N_context, (x_size + y_size)]
+
         batch_size = input.shape[0]
         input = input.view(-1, self.input_size)     #[batch_size * N_context, (x_size + y_size)]
 
         for fc in self.fcs[:-1]:
             input = F.relu(fc(input))               #[batch_size * N_context, hidden_size]
 
-        input = input.view(batch_size, -1, self.hidden_size)     #[batch_size, N_context, hidden_size]
-        if self.self_att == True:
+        input = input.view(batch_size, -1, self.hidden_size)    #[batch_size, N_context, hidden_size]
+        if self.self_att:
             input = self.self_attention.forward(input)  #[batch_size, N_context, hidden_size]
 
         input = self.fcs[-1](input)         #[batch_size, N_context, r_size]
 
         # Aggregate the embeddings
-        input = input.view(batch_size, -1, self.r_size)  # [batch_size, N_context, self.r_size]
+        input = input.view(batch_size, -1, self.r_size)  # [batch_size, N_context, r_size]
 
         #Using cross attention
         x_target = x_target.view(-1, self.x_size)
@@ -107,20 +112,23 @@ class DeterministicEncoder(nn.Module):
         keys = keys.view(batch_size, -1, self.hidden_size)
 
         if self.attention_type == "multihead":
-            output = self.cross_attention.forward(queries=queries.float(), keys=keys.float(), values=input) #[batch_size, N_target, r_size]
+            output = self.cross_attention.forward(queries=queries.float(), keys=keys.float(),
+                                                  values=input) #[batch_size, N_target, r_size]
 
         elif self.attention_type == "uniform":
             output = uniform_attention(queries=queries.float(), values=input)
 
         elif self.attention_type == "laplace":
-            output = laplace_attention(queries=x_target.float(), keys=x.float(), values=input, scale=1.0, normalise=True)
+            output = laplace_attention(queries=x_target.float(), keys=x.float(), values=input,
+                                       scale=1.0, normalise=True)
 
         elif self.attention_type == "dot_product":
-            output = dot_product_attention(queries=x_target.float(), keys=x.float(), values=input, normalise=True)
+            output = dot_product_attention(queries=x_target.float(), keys=x.float(),
+                                           values=input, normalise=True)
 
         #Otherwise take the mean of the embeddings as for the vanilla NP (same as uniform).
         else:
             output = torch.squeeze(torch.mean(input, dim=1), dim=1)   #[batch_size, self.r_size]
-            output = torch.unsqueeze(output, dim=1).repeat(1, x_target.shape[1], 1)   #[batch_size, N_target, self.r_size]
+            output = torch.unsqueeze(output, dim=1).repeat(1, x_target.shape[1], 1)  #[batch_size, # N_target, self.r_size]
 
         return output
